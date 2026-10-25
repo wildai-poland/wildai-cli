@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/wildai-poland/.github/main/assets/logo.png" width="140" height="140" alt="WildAI CLI" />
+
 # WildAI CLI
 
 **Official command-line interface & autonomous coding agent for the WildAI platform.**
