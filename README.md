@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/wildai-poland/.github/main/assets/logo.png" width="140" height="140" alt="WildAI CLI" />
+<img src="./assets/logo.png" width="140" height="140" alt="WildAI CLI" />
 
 # WildAI CLI
 
