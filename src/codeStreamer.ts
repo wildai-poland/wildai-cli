@@ -111,7 +111,7 @@ export class CodeBoxStreamer {
 
     let idx = 0;
     while (idx < toProcess.length) {
-      // Ukrywanie surowego strumienia ![image](data:image/...;base64,...) w terminalu
+      // Ukrywanie surowego strumienia ![image/video](data:image/video...;base64,...) w terminalu
       if (this.inBase64Image) {
         if (toProcess[idx] === ')') {
           this.inBase64Image = false;
@@ -119,10 +119,10 @@ export class CodeBoxStreamer {
         idx++;
         continue;
       }
-      const imgStart = toProcess.slice(idx).match(/^!\[[^\]]*\]\(data:image\//i);
-      if (imgStart) {
+      const mediaStart = toProcess.slice(idx).match(/^!\[[^\]]*\]\(data:(image|video)\//i);
+      if (mediaStart) {
         this.inBase64Image = true;
-        idx += imgStart[0].length;
+        idx += mediaStart[0].length;
         continue;
       }
 

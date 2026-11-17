@@ -158,6 +158,7 @@ export async function deleteUserChat(
   }
 }
 
+let lastMedia: { type: 'image' | 'video'; base64: string; path?: string } | null = null;
 let lastImageBase64: string | null = null;
 let lastSavedImagePath: string | null = null;
 
@@ -193,16 +194,36 @@ function renderLoadedChatMessages(chat: ChatDetail) {
       console.log(chalk.bold.cyan('❯ Ty: ') + chalk.white(m.content));
       console.log('');
     } else if (m.role === 'assistant') {
-      const b64Match = (m.content || '').match(/data:image\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
-      if (b64Match && b64Match[1]) {
-        lastImageBase64 = b64Match[1];
-        lastSavedImagePath = null;
+      const vidMatch = (m.content || '').match(/data:video\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
+      if (vidMatch && vidMatch[1]) {
+        lastMedia = { type: 'video', base64: vidMatch[1] };
+      } else {
+        const b64Match = (m.content || '').match(/data:image\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
+        if (b64Match && b64Match[1]) {
+          lastMedia = { type: 'image', base64: b64Match[1] };
+          lastImageBase64 = b64Match[1];
+          lastSavedImagePath = null;
+        }
       }
 
       const cleaned = (m.content || '')
         .replace(/<think[^>]*>[\s\S]*?<\/think>\s*/gi, '')
         .replace(/\[\[THINK\]\][\s\S]*?\[\[\/THINK\]\]\s*/gi, '')
         .replace(/<steps[^>]*>[\s\S]*?<\/steps>\s*/gi, '')
+        .replace(
+          /!\[[^\]]*\]\(data:video\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]+\)/g,
+          chalk.bold.magenta('🎬  [Wygenerowane wideo AI (MP4)]') +
+            chalk.dim(' — wpisz ') +
+            chalk.bold.yellow('/open') +
+            chalk.dim(' aby odtworzyć wideo')
+        )
+        .replace(
+          /data:video\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]+/g,
+          chalk.bold.magenta('🎬  [Wygenerowane wideo AI (MP4)]') +
+            chalk.dim(' — wpisz ') +
+            chalk.bold.yellow('/open') +
+            chalk.dim(' aby odtworzyć wideo')
+        )
         .replace(
           /!\[[^\]]*\]\(data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]+\)/g,
           chalk.bold.cyan('🖼️  [Wygenerowany obraz AI (PNG)]') +
@@ -219,7 +240,7 @@ function renderLoadedChatMessages(chat: ChatDetail) {
         )
         .trim();
 
-      const preview = cleaned.includes('🖼️')
+      const preview = cleaned.includes('🖼️') || cleaned.includes('🎬')
         ? cleaned
         : cleaned.substring(0, 600) + (cleaned.length > 600 ? '...' : '');
       console.log(chalk.bold.hex('#10a37f')('✦ WildAI: ') + chalk.gray(preview));
@@ -620,25 +641,47 @@ export async function startChat(options?: { resumeChatId?: string; openHistory?:
         continue;
       }
 
+      if (command === '/video') {
+        if (!arg.trim()) {
+          printWarning('Podaj opis wideo po komendzie, np. /video neonowy kryształ w jaskini');
+          continue;
+        }
+        userInput = `/video ${arg.trim()}`;
+        // Przejdź do standardowej pętli wysyłania zapytania
+      }
+
       if (command === '/open') {
-        if (!lastImageBase64 && !lastSavedImagePath) {
-          printWarning('Brak obrazu w aktualnej rozmowie do otwarcia.');
+        if (!lastMedia?.path && !lastMedia?.base64 && !lastImageBase64 && !lastSavedImagePath) {
+          printWarning('Brak pliku wideo ani obrazu w aktualnej rozmowie do otwarcia.');
           continue;
         }
         try {
-          if (!lastSavedImagePath && lastImageBase64) {
+          let openTarget = lastMedia?.path || lastSavedImagePath;
+          if (!openTarget && lastMedia?.base64) {
+            const ext = lastMedia.type === 'video' ? 'mp4' : 'png';
+            const fileName = `wildai-${lastMedia.type}-${Date.now()}.${ext}`;
+            openTarget = path.resolve(process.cwd(), fileName);
+            fs.writeFileSync(openTarget, Buffer.from(lastMedia.base64, 'base64'));
+            lastMedia.path = openTarget;
+          } else if (!openTarget && lastImageBase64) {
             const fileName = `wildai-image-${Date.now()}.png`;
-            lastSavedImagePath = path.resolve(process.cwd(), fileName);
-            fs.writeFileSync(lastSavedImagePath, Buffer.from(lastImageBase64, 'base64'));
+            openTarget = path.resolve(process.cwd(), fileName);
+            fs.writeFileSync(openTarget, Buffer.from(lastImageBase64, 'base64'));
+            lastSavedImagePath = openTarget;
           }
-          if (lastSavedImagePath) {
-            printSuccess(`Zapisano i otwieram obraz: ${chalk.bold.green(lastSavedImagePath)}`);
+          if (openTarget) {
+            const isVid = openTarget.endsWith('.mp4');
+            printSuccess(`Otwieram ${isVid ? 'wideo' : 'obraz'}: ${chalk.bold.green(openTarget)}`);
             if (process.platform === 'darwin') {
-              exec(`open "${lastSavedImagePath}"`);
+              exec(`open "${openTarget}"`);
+            } else if (process.platform === 'win32') {
+              exec(`start "" "${openTarget}"`);
+            } else {
+              exec(`xdg-open "${openTarget}"`);
             }
           }
         } catch (e: any) {
-          printError(`Nie udało się otworzyć obrazu: ${e.message}`);
+          printError(`Nie udało się otworzyć pliku: ${e.message}`);
         }
         continue;
       }
@@ -891,19 +934,36 @@ Napisz jedno krótkie zdanie co robisz (np. "Tworzę plik programu hammer.py na 
       }
       streamer.flush();
 
-      // Jeśli odpowiedź zawiera obraz base64, zapisz go od razu do pliku i powiadom użytkownika
-      const streamImgMatch = fullResponse.match(/data:image\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
-      if (streamImgMatch && streamImgMatch[1]) {
-        lastImageBase64 = streamImgMatch[1];
-        const fileName = `wildai-image-${Date.now()}.png`;
-        lastSavedImagePath = path.resolve(process.cwd(), fileName);
-        fs.writeFileSync(lastSavedImagePath, Buffer.from(lastImageBase64, 'base64'));
+      // Jeśli odpowiedź zawiera wideo base64, zapisz je od razu do pliku MP4 i powiadom użytkownika
+      const streamVideoMatch = fullResponse.match(/data:video\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
+      if (streamVideoMatch && streamVideoMatch[1]) {
+        const videoB64 = streamVideoMatch[1];
+        const fileName = `wildai-video-${Date.now()}.mp4`;
+        const savedVideoPath = path.resolve(process.cwd(), fileName);
+        fs.writeFileSync(savedVideoPath, Buffer.from(videoB64, 'base64'));
+        lastMedia = { type: 'video', base64: videoB64, path: savedVideoPath };
         console.log(
-          `\n${chalk.bold.cyan('🖼️  [Wygenerowano obraz AI]')} Zapisano do: ${chalk.bold.green(lastSavedImagePath)}` +
+          `\n${chalk.bold.magenta('🎬  [Wygenerowano wideo Grok (MP4)]')} Zapisano do: ${chalk.bold.green(savedVideoPath)}` +
             chalk.dim(' (wpisz ') +
             chalk.bold.yellow('/open') +
-            chalk.dim(' aby otworzyć w Podglądzie)')
+            chalk.dim(' aby odtworzyć wideo)')
         );
+      } else {
+        // Jeśli odpowiedź zawiera obraz base64, zapisz go od razu do pliku i powiadom użytkownika
+        const streamImgMatch = fullResponse.match(/data:image\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
+        if (streamImgMatch && streamImgMatch[1]) {
+          const imgB64 = streamImgMatch[1];
+          const fileName = `wildai-image-${Date.now()}.png`;
+          lastSavedImagePath = path.resolve(process.cwd(), fileName);
+          fs.writeFileSync(lastSavedImagePath, Buffer.from(imgB64, 'base64'));
+          lastMedia = { type: 'image', base64: imgB64, path: lastSavedImagePath };
+          console.log(
+            `\n${chalk.bold.cyan('🖼️  [Wygenerowano obraz AI]')} Zapisano do: ${chalk.bold.green(lastSavedImagePath)}` +
+              chalk.dim(' (wpisz ') +
+              chalk.bold.yellow('/open') +
+              chalk.dim(' aby otworzyć w Podglądzie)')
+          );
+        }
       }
 
       const endTime = Date.now();
