@@ -119,7 +119,7 @@ export class CodeBoxStreamer {
         idx++;
         continue;
       }
-      const mediaStart = toProcess.slice(idx).match(/^!\[[^\]]*\]\(data:(image|video)\//i);
+      const mediaStart = toProcess.slice(idx).match(/^!\[[^\]]*\]\((?:data:(?:image|video)\/|\/api\/videos\/)/i);
       if (mediaStart) {
         this.inBase64Image = true;
         idx += mediaStart[0].length;

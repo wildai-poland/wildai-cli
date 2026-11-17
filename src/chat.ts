@@ -211,6 +211,13 @@ function renderLoadedChatMessages(chat: ChatDetail) {
         .replace(/\[\[THINK\]\][\s\S]*?\[\[\/THINK\]\]\s*/gi, '')
         .replace(/<steps[^>]*>[\s\S]*?<\/steps>\s*/gi, '')
         .replace(
+          /!\[[^\]]*\]\(\/api\/videos\/[a-zA-Z0-9_-]+\)/g,
+          chalk.bold.magenta('🎬  [Wygenerowane wideo AI (MP4)]') +
+            chalk.dim(' — wpisz ') +
+            chalk.bold.yellow('/open') +
+            chalk.dim(' aby odtworzyć wideo')
+        )
+        .replace(
           /!\[[^\]]*\]\(data:video\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]+\)/g,
           chalk.bold.magenta('🎬  [Wygenerowane wideo AI (MP4)]') +
             chalk.dim(' — wpisz ') +
@@ -934,9 +941,27 @@ Napisz jedno krótkie zdanie co robisz (np. "Tworzę plik programu hammer.py na 
       }
       streamer.flush();
 
-      // Jeśli odpowiedź zawiera wideo base64, zapisz je od razu do pliku MP4 i powiadom użytkownika
+      // Jeśli odpowiedź zawiera link /api/videos/... lub wideo base64, zapisz je od razu do pliku MP4
+      const streamVideoUrlMatch = fullResponse.match(/\/api\/videos\/([a-zA-Z0-9_-]+)/);
       const streamVideoMatch = fullResponse.match(/data:video\/[a-zA-Z0-9+.-]+;base64,([A-Za-z0-9+/=]+)/);
-      if (streamVideoMatch && streamVideoMatch[1]) {
+      if (streamVideoUrlMatch && streamVideoUrlMatch[1]) {
+        try {
+          const vidRes = await fetch(`${baseUrl}/api/videos/${streamVideoUrlMatch[1]}`);
+          if (vidRes.ok) {
+            const vidBuf = Buffer.from(await vidRes.arrayBuffer());
+            const fileName = `wildai-video-${Date.now()}.mp4`;
+            const savedVideoPath = path.resolve(process.cwd(), fileName);
+            fs.writeFileSync(savedVideoPath, vidBuf);
+            lastMedia = { type: 'video', base64: '', path: savedVideoPath };
+            console.log(
+              `\n${chalk.bold.magenta('🎬  [Wygenerowano wideo Grok (MP4)]')} Zapisano do: ${chalk.bold.green(savedVideoPath)}` +
+                chalk.dim(' (wpisz ') +
+                chalk.bold.yellow('/open') +
+                chalk.dim(' aby odtworzyć wideo)')
+            );
+          }
+        } catch {}
+      } else if (streamVideoMatch && streamVideoMatch[1]) {
         const videoB64 = streamVideoMatch[1];
         const fileName = `wildai-video-${Date.now()}.mp4`;
         const savedVideoPath = path.resolve(process.cwd(), fileName);
